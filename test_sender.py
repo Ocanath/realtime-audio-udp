@@ -7,8 +7,8 @@ import time
 import math
 
 
-def generate_sine_wave_samples(frequency: float, sample_rate: int, duration: float, amplitude: float = 0.3):
-    """Generate sine wave audio samples"""
+def generate_continuous_sine_wave(frequency: float, sample_rate: int, duration: float, amplitude: float = 0.3):
+    """Generate continuous sine wave audio samples"""
     num_samples = int(sample_rate * duration)
     samples = []
     
@@ -25,8 +25,9 @@ def generate_sine_wave_samples(frequency: float, sample_rate: int, duration: flo
 
 
 def send_audio_packets(host: str, port: int, sample_rate: int = 16000, 
-                      tone_frequency: float = 440.0, packet_duration: float = 0.02):
-    """Send UDP audio packets with a sine wave tone"""
+                      tone_frequency: float = 440.0, packet_duration: float = 0.02,
+                      buffer_duration: float = 3.0):
+    """Send UDP audio packets with a continuous sine wave tone"""
     
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     
@@ -34,45 +35,67 @@ def send_audio_packets(host: str, port: int, sample_rate: int = 16000,
     print(f"Sample rate: {sample_rate} Hz")
     print(f"Tone frequency: {tone_frequency} Hz")
     print(f"Packet duration: {packet_duration} seconds")
+    print(f"Buffer duration: {buffer_duration} seconds")
     print(f"Frame format: [2-byte seq#][4-byte sample timestamp][audio samples]")
     print("Press Ctrl+C to stop")
+    
+    # Calculate packet parameters
+    samples_per_packet = int(sample_rate * packet_duration)
+    buffer_samples = int(sample_rate * buffer_duration)
+    packets_per_buffer = buffer_samples // samples_per_packet
+    
+    print(f"Samples per packet: {samples_per_packet}")
+    print(f"Packets per buffer: {packets_per_buffer}")
     
     try:
         packet_count = 0
         seq_num = 0
         sample_timestamp = 0
+        buffer_start_time = 0.0  # Time offset for continuous sine wave
         
         while True:
-            # Generate audio samples for this packet
-            samples = generate_sine_wave_samples(tone_frequency, sample_rate, packet_duration)
+            # Generate continuous audio buffer
+            # print(f"Generating {buffer_duration}s audio buffer...")
+            audio_buffer = generate_continuous_sine_wave(
+                tone_frequency, sample_rate, buffer_duration
+            )
             
-            # Pack frame header: [2 bytes seq#][4 bytes sample_timestamp]
-            header = struct.pack('<HI', seq_num, sample_timestamp)
+            # Send packets from the buffer
+            for packet_idx in range(packets_per_buffer):
+                start_sample = packet_idx * samples_per_packet
+                end_sample = start_sample + samples_per_packet
+                packet_samples = audio_buffer[start_sample:end_sample]
+                
+                # Pack frame header: [2 bytes seq#][4 bytes sample_timestamp]
+                header = struct.pack('<HI', seq_num, sample_timestamp)
+                
+                # Pack audio samples as little-endian 16-bit integers
+                audio_data = struct.pack(f'<{len(packet_samples)}h', *packet_samples)
+                
+                # Combine header and audio data
+                packet_data = header + audio_data
+                
+                # Send packet
+                sock.sendto(packet_data, (host, port))
+                packet_count += 1
+                
+                # Update counters for next packet
+                seq_num = (seq_num + 1) % 65536  # Wrap at 16-bit boundary
+                sample_timestamp += len(packet_samples)
+                
+                # if packet_count % 50 == 0:  # Print status every 50 packets
+                #     print(f"Sent {packet_count} packets (seq: {seq_num-1}, timestamp: {sample_timestamp-len(packet_samples)})...")
+                
+                # Sleep to maintain real-time rate
             
-            # Pack audio samples as little-endian 16-bit integers
-            audio_data = struct.pack(f'<{len(samples)}h', *samples)
-            
-            # Combine header and audio data
-            packet_data = header + audio_data
-            
-            # Send packet
-            sock.sendto(packet_data, (host, port))
-            packet_count += 1
-            
-            # Update counters for next packet
-            seq_num = (seq_num + 1) % 65536  # Wrap at 16-bit boundary
-            sample_timestamp += len(samples)  # Increment by number of samples in this packet
-            
-            if packet_count % 50 == 0:  # Print status every 50 packets (1 second at 20ms packets)
-                print(f"Sent {packet_count} packets (seq: {seq_num-1}, timestamp: {sample_timestamp-len(samples)})...")
-            
-            # Sleep to maintain real-time rate
-            time.sleep(packet_duration)
+            # Update buffer start time for next continuous buffer
+            buffer_start_time += buffer_duration
+            # time.sleep(packet_duration)
             
     except KeyboardInterrupt:
         print(f"\nSent {packet_count} total packets")
         print(f"Final sequence number: {seq_num-1}")
-        print(f"Final sample timestamp: {sample_timestamp-len(samples)}")
+        print(f"Final sample timestamp: {sample_timestamp}")
     finally:
         sock.close()
 
@@ -87,6 +110,8 @@ def main():
                        help='Sine wave frequency in Hz (default: 440.0)')
     parser.add_argument('--packet-duration', type=float, default=0.02,
                        help='Duration of each packet in seconds (default: 0.02)')
+    parser.add_argument('--buffer-duration', type=float, default=3.0,
+                       help='Duration of continuous audio buffer in seconds (default: 3.0)')
     
     args = parser.parse_args()
     
@@ -108,7 +133,7 @@ def main():
         return 1
     
     send_audio_packets(args.host, args.port, args.sample_rate, 
-                      args.frequency, args.packet_duration)
+                      args.frequency, args.packet_duration, args.buffer_duration)
     
     return 0
 

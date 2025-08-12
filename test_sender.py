@@ -34,29 +34,45 @@ def send_audio_packets(host: str, port: int, sample_rate: int = 16000,
     print(f"Sample rate: {sample_rate} Hz")
     print(f"Tone frequency: {tone_frequency} Hz")
     print(f"Packet duration: {packet_duration} seconds")
+    print(f"Frame format: [2-byte seq#][4-byte sample timestamp][audio samples]")
     print("Press Ctrl+C to stop")
     
     try:
         packet_count = 0
+        seq_num = 0
+        sample_timestamp = 0
+        
         while True:
             # Generate audio samples for this packet
             samples = generate_sine_wave_samples(tone_frequency, sample_rate, packet_duration)
             
-            # Pack samples as little-endian 16-bit integers
-            packet_data = struct.pack(f'<{len(samples)}h', *samples)
+            # Pack frame header: [2 bytes seq#][4 bytes sample_timestamp]
+            header = struct.pack('<HI', seq_num, sample_timestamp)
+            
+            # Pack audio samples as little-endian 16-bit integers
+            audio_data = struct.pack(f'<{len(samples)}h', *samples)
+            
+            # Combine header and audio data
+            packet_data = header + audio_data
             
             # Send packet
             sock.sendto(packet_data, (host, port))
             packet_count += 1
             
+            # Update counters for next packet
+            seq_num = (seq_num + 1) % 65536  # Wrap at 16-bit boundary
+            sample_timestamp += len(samples)  # Increment by number of samples in this packet
+            
             if packet_count % 50 == 0:  # Print status every 50 packets (1 second at 20ms packets)
-                print(f"Sent {packet_count} packets...")
+                print(f"Sent {packet_count} packets (seq: {seq_num-1}, timestamp: {sample_timestamp-len(samples)})...")
             
             # Sleep to maintain real-time rate
             time.sleep(packet_duration)
             
     except KeyboardInterrupt:
         print(f"\nSent {packet_count} total packets")
+        print(f"Final sequence number: {seq_num-1}")
+        print(f"Final sample timestamp: {sample_timestamp-len(samples)}")
     finally:
         sock.close()
 

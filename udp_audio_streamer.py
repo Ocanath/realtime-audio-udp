@@ -33,6 +33,13 @@ class UDPAudioStreamer:
         self.udp_thread = None
         self.audio_thread = None
         
+        # Packet tracking
+        self.last_seq_num = None
+        self.expected_sample_timestamp = 0
+        self.packets_received = 0
+        self.packets_dropped = 0
+        self.packets_out_of_order = 0
+        
         # PyAudio setup
         self.pyaudio_instance = pyaudio.PyAudio()
         self.stream = None
@@ -71,31 +78,61 @@ class UDPAudioStreamer:
         
         print(f"UDP Audio Streamer listening on 0.0.0.0:{self.port}")
         print(f"Sample rate: {self.sample_rate} Hz")
+        print(f"Frame format: [2-byte seq#][4-byte sample timestamp][audio samples]")
         if self.save_file:
             print(f"Saving audio to: {self.save_file}")
         
         while self.running:
             try:
                 data, addr = self.sock.recvfrom(4096)
-                if data and len(data) >= 2:
-                    # Parse little-endian 16-bit samples
-                    samples = struct.unpack(f'<{len(data)//2}h', data)
-                    audio_bytes = struct.pack(f'{len(samples)}h', *samples)
+                if data and len(data) >= 6:  # Minimum: 2 bytes seq + 4 bytes timestamp
+                    # Parse frame header: [2 bytes seq#][4 bytes sample_timestamp]
+                    seq_num, sample_timestamp = struct.unpack('<HI', data[:6])
                     
-                    # Add to playback queue
-                    try:
-                        self.audio_queue.put_nowait(audio_bytes)
-                    except queue.Full:
-                        # Drop oldest packet if queue is full
+                    # Extract audio samples from remaining data
+                    audio_data = data[6:]
+                    if len(audio_data) >= 2 and len(audio_data) % 2 == 0:
+                        # Parse little-endian 16-bit samples
+                        num_samples = len(audio_data) // 2
+                        samples = struct.unpack(f'<{num_samples}h', audio_data)
+                        audio_bytes = struct.pack(f'{num_samples}h', *samples)
+                        
+                        # Track packet statistics
+                        self.packets_received += 1
+                        
+                        # Check for dropped packets
+                        if self.last_seq_num is not None:
+                            expected_seq = (self.last_seq_num + 1) % 65536
+                            if seq_num != expected_seq:
+                                if seq_num > expected_seq or (expected_seq > 32768 and seq_num < 32768):
+                                    # Packets were dropped
+                                    dropped = (seq_num - expected_seq) % 65536
+                                    self.packets_dropped += dropped
+                                    print(f"Warning: {dropped} packet(s) dropped (seq {expected_seq} to {seq_num-1})")
+                                else:
+                                    # Out of order packet
+                                    self.packets_out_of_order += 1
+                                    print(f"Warning: Out of order packet (seq {seq_num}, expected {expected_seq})")
+                        
+                        self.last_seq_num = seq_num
+                        
+                        # Add to playback queue
                         try:
-                            self.audio_queue.get_nowait()
                             self.audio_queue.put_nowait(audio_bytes)
-                        except queue.Empty:
-                            pass
+                        except queue.Full:
+                            # Drop oldest packet if queue is full
+                            try:
+                                self.audio_queue.get_nowait()
+                                self.audio_queue.put_nowait(audio_bytes)
+                            except queue.Empty:
+                                pass
+                        
+                        # Save to file if requested
+                        if self.save_file:
+                            self.audio_data_buffer.append(audio_bytes)
                     
-                    # Save to file if requested
-                    if self.save_file:
-                        self.audio_data_buffer.append(audio_bytes)
+                    elif len(audio_data) > 0:
+                        print(f"Warning: Invalid audio data length {len(audio_data)} (must be even)")
                         
             except socket.timeout:
                 continue
@@ -159,9 +196,19 @@ class UDPAudioStreamer:
         if self.sock:
             self.sock.close()
         
+        # Print statistics
+        if self.packets_received > 0:
+            print(f"\nPacket Statistics:")
+            print(f"  Packets received: {self.packets_received}")
+            print(f"  Packets dropped: {self.packets_dropped}")
+            print(f"  Packets out of order: {self.packets_out_of_order}")
+            if self.packets_received > 0:
+                drop_rate = (self.packets_dropped / (self.packets_received + self.packets_dropped)) * 100
+                print(f"  Drop rate: {drop_rate:.2f}%")
+        
         # Save buffered audio data to file
         if self.wav_file and self.audio_data_buffer:
-            print(f"Writing {len(self.audio_data_buffer)} audio chunks to {self.save_file}")
+            print(f"\nWriting {len(self.audio_data_buffer)} audio chunks to {self.save_file}")
             for chunk in self.audio_data_buffer:
                 self.wav_file.writeframes(chunk)
             self.wav_file.close()

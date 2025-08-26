@@ -81,7 +81,7 @@ class UDPAudioStreamer:
         print(f"Frame format: [2-byte seq#][4-byte sample timestamp][audio samples]")
         if self.save_file:
             print(f"Saving audio to: {self.save_file}")
-        
+        self.sock.sendto(bytearray("Hello",encoding='utf8'), ('10.0.4.143',6701))
         while self.running:
             try:
                 data, addr = self.sock.recvfrom(4096)

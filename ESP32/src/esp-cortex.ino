@@ -27,7 +27,7 @@ IPAddress server_address; //note: may want to change to our local IP, to support
 
 
 // you shouldn't need to change these settings
-#define SAMPLE_BUFFER_SIZE 512
+
 #define SAMPLE_RATE 16000
 // most microphones will probably default to left channel but you may need to tie the L/R pin low
 #define I2S_MIC_CHANNEL I2S_CHANNEL_FMT_ONLY_LEFT
@@ -126,17 +126,38 @@ uint32_t blink_per = PERIOD_DISCONNECTED;
 uint8_t udp_pkt_buf[256] = {0};
 int ppp_stuffing_bidx = 0;
 
+#define NUM_BYTES_HEADER		6	//two bytes sequence, four bytes epoch
+#define NUM_BYTES_SAMPLE_BUFFER (512*sizeof(int32_t))
+unsigned char pld_buf[NUM_BYTES_HEADER + NUM_BYTES_SAMPLE_BUFFER] = {};
+unsigned char * p_raw_sample_buf = (unsigned char *)(&pld_buf[NUM_BYTES_HEADER]);
 
-
-int32_t raw_samples[SAMPLE_BUFFER_SIZE] = {};
-
+uint16_t sequence_number = 0;
+uint32_t cnt = 0;
 void loop() 
-{
+{	
 
-	/**/
+
+	/*TODO: Consider calling this less frequently to reduce latency for real time traffic management*/
 	size_t bytes_read = 0;
-	i2s_read(I2S_NUM_0, raw_samples, sizeof(int32_t) * SAMPLE_BUFFER_SIZE, &bytes_read, portMAX_DELAY);
-	int samples_read = bytes_read / sizeof(int32_t);
+	i2s_read(I2S_NUM_0, p_raw_sample_buf, NUM_BYTES_SAMPLE_BUFFER, &bytes_read, portMAX_DELAY);
+	if(bytes_read != 0)
+	{
+		//load sequence number
+		pld_buf[0] = (sequence_number & 0x00FF);
+		pld_buf[1] = (sequence_number & 0xFF00) >> 8;
+		sequence_number++;	//overflow is normal behvaior
+
+		//load millisecond epoch
+		uint32_t tick = millis();
+		pld_buf[0] = tick & 0x000000FF;
+		pld_buf[1] = (tick & 0x0000FF00) >> 8;
+		pld_buf[2] = (tick & 0x00FF0000) >> 16;
+		pld_buf[3] = (tick & 0xFF000000 )>> 24;
+
+		udp.beginPacket(udp.remoteIP(),udp.remotePort()+gl_prefs.reply_offset);
+		udp.write((uint8_t*)pld_buf, NUM_BYTES_HEADER + bytes_read);
+		udp.endPacket();
+	}
   // dump the samples out to the serial channel.
 //   for (int i = 0; i < samples_read; i++)
 //   {
@@ -161,14 +182,14 @@ void loop()
       udp.write((uint8_t*)gl_prefs.name,len);
       udp.endPacket();
     }
-  cmp = cmd_match((const char *)udp_pkt_buf,"SPAM_ME");
-    if(cmp > 0)
-    {
-      int len = strlen(gl_prefs.name);
-      udp.beginPacket(udp.remoteIP(),udp.remotePort()+gl_prefs.reply_offset);
-      udp.write((uint8_t*)"WAZZAAAP",8);
-      udp.endPacket();
-    }
+//   cmp = cmd_match((const char *)udp_pkt_buf,"SPAM_ME");
+//     if(cmp > 0)
+//     {
+//       int len = strlen(gl_prefs.name);
+//       udp.beginPacket(udp.remoteIP(),udp.remotePort()+gl_prefs.reply_offset);
+//       udp.write((uint8_t*)"WAZZAAAP",8);
+//       udp.endPacket();
+//     }
     
     Serial2.write(udp_pkt_buf,len);
     for(int i = 0; i < len; i++)

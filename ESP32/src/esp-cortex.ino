@@ -8,6 +8,7 @@
 #include <WiFiUdp.h>
 #include <ArduinoOTA.h>
 #include <driver/i2s.h>
+#include "array_process.h"
 
 #define NRST_PIN 2
 #define LED_PIN 32
@@ -133,6 +134,8 @@ unsigned char * p_raw_sample_buf = (unsigned char *)(&pld_buf[NUM_BYTES_HEADER])
 
 uint16_t sequence_number = 0;
 uint32_t cnt = 0;
+
+
 void loop() 
 {	
 
@@ -143,9 +146,9 @@ void loop()
 	if(bytes_read != 0)
 	{
 		//load sequence number
+		sequence_number++;	//overflow is normal behvaior
 		pld_buf[0] = (sequence_number & 0x00FF);
 		pld_buf[1] = (sequence_number & 0xFF00) >> 8;
-		sequence_number++;	//overflow is normal behvaior
 
 		//load millisecond epoch
 		uint32_t tick = millis();
@@ -153,16 +156,19 @@ void loop()
 		pld_buf[1] = (tick & 0x0000FF00) >> 8;
 		pld_buf[2] = (tick & 0x00FF0000) >> 16;
 		pld_buf[3] = (tick & 0xFF000000 )>> 24;
+		
+		// process_32bit_to_16bit(pld_buf, bytes_read, &bytes_read);
+		// dump the samples out to the serial channel.
+		int32_t * raw_samples = (int32_t*)(&pld_buf[NUM_BYTES_HEADER]);
+		for (int i = 0; i < bytes_read/4; i++)
+		{
+			Serial.printf("%ld\n", raw_samples[i]);
+		}
 
 		udp.beginPacket(udp.remoteIP(),udp.remotePort()+gl_prefs.reply_offset);
 		udp.write((uint8_t*)pld_buf, NUM_BYTES_HEADER + bytes_read);
 		udp.endPacket();
 	}
-  // dump the samples out to the serial channel.
-//   for (int i = 0; i < samples_read; i++)
-//   {
-//     Serial.printf("%ld\n", raw_samples[i]);
-//   }
 
 
   
@@ -197,30 +203,30 @@ void loop()
   }
 
   uint8_t serial_pkt_sent = 0;
-  while(Serial2.available())
-  {
-      uint8_t new_byte = Serial2.read();
-      int pld_len = parse_PPP_stream(new_byte, gl_pld_buffer, PAYLOAD_BUFFER_SIZE, gl_unstuffing_buffer, UNSTUFFING_BUFFER_SIZE, &ppp_stuffing_bidx);
-      if(pld_len != 0)
-      {
-        if(gl_prefs.en_fixed_target == 0 && udp.remoteIP() != IPAddress(0,0,0,0))
-        {
-          udp.beginPacket(udp.remoteIP(), udp.remotePort()+gl_prefs.reply_offset);
-        }
-        else if (gl_prefs.en_fixed_target == 0 &&udp.remoteIP() == IPAddress(0,0,0,0))
-        {
-          udp.beginPacket(IPAddress(255,255,255,255), gl_prefs.port+gl_prefs.reply_offset);
-        }
-        else
-        {
-          IPAddress remote_ip(gl_prefs.remote_target_ip);
-          udp.beginPacket(remote_ip, gl_prefs.port+gl_prefs.reply_offset);
-        }
-        udp.write((uint8_t*)gl_pld_buffer, pld_len);
-        udp.endPacket();      
-        serial_pkt_sent = 1;
-      }
-  }
+//   while(Serial2.available())
+//   {
+//       uint8_t new_byte = Serial2.read();
+//       int pld_len = parse_PPP_stream(new_byte, gl_pld_buffer, PAYLOAD_BUFFER_SIZE, gl_unstuffing_buffer, UNSTUFFING_BUFFER_SIZE, &ppp_stuffing_bidx);
+//       if(pld_len != 0)
+//       {
+//         if(gl_prefs.en_fixed_target == 0 && udp.remoteIP() != IPAddress(0,0,0,0))
+//         {
+//           udp.beginPacket(udp.remoteIP(), udp.remotePort()+gl_prefs.reply_offset);
+//         }
+//         else if (gl_prefs.en_fixed_target == 0 &&udp.remoteIP() == IPAddress(0,0,0,0))
+//         {
+//           udp.beginPacket(IPAddress(255,255,255,255), gl_prefs.port+gl_prefs.reply_offset);
+//         }
+//         else
+//         {
+//           IPAddress remote_ip(gl_prefs.remote_target_ip);
+//           udp.beginPacket(remote_ip, gl_prefs.port+gl_prefs.reply_offset);
+//         }
+//         udp.write((uint8_t*)gl_pld_buffer, pld_len);
+//         udp.endPacket();      
+//         serial_pkt_sent = 1;
+//       }
+//   }
 
   get_console_lines();
   if(gl_console_cmd.parsed == 0)

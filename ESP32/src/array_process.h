@@ -4,7 +4,7 @@
 #include <strings.h>
 
 
-void process_32bit_to_16bit(unsigned char * parr, size_t arr_size, size_t * newlen);
+void process_32bit_to_16bit(unsigned char * parr, size_t arr_size, int32_t div, size_t * newlen);
 
 
 #endif

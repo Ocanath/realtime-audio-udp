@@ -138,8 +138,6 @@ uint32_t cnt = 0;
 
 void loop() 
 {	
-
-
 	/*TODO: Consider calling this less frequently to reduce latency for real time traffic management*/
 	size_t bytes_read = 0;
 	i2s_read(I2S_NUM_0, p_raw_sample_buf, NUM_BYTES_SAMPLE_BUFFER, &bytes_read, portMAX_DELAY);
@@ -157,17 +155,18 @@ void loop()
 		pld_buf[2] = (tick & 0x00FF0000) >> 16;
 		pld_buf[3] = (tick & 0xFF000000 )>> 24;
 
-		{
-			process_32bit_to_16bit(p_raw_sample_buf, bytes_read, &bytes_read);
-			// dump the samples out to the serial channel.
-			int16_t * raw_samples = (int16_t*)(&pld_buf[NUM_BYTES_HEADER]);
-			for (int i = 0; i < bytes_read/2; i++)
-			{
-				Serial.printf("%ld\n", raw_samples[i]);
-			}
+
+		process_32bit_to_16bit(p_raw_sample_buf, bytes_read, 65536/64, &bytes_read);
+		{			
+			// // dump the samples out to the serial channel.
+			// int16_t * raw_samples = (int16_t*)(&pld_buf[NUM_BYTES_HEADER]);
+			// for (int i = 0; i < bytes_read/2; i++)
+			// {
+			// 	Serial.printf("%ld\n", raw_samples[i]);
+			// }
 		}
 
-		udp.beginPacket(udp.remoteIP(),udp.remotePort()+gl_prefs.reply_offset);
+		udp.beginPacket(udp.remoteIP(), 6767);		//hardcode the sendo ip for now to split the datastreams across two programs. audio server is second
 		udp.write((uint8_t*)pld_buf, NUM_BYTES_HEADER + bytes_read);
 		udp.endPacket();
 	}

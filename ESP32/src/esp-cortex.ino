@@ -156,13 +156,15 @@ void loop()
 		pld_buf[1] = (tick & 0x0000FF00) >> 8;
 		pld_buf[2] = (tick & 0x00FF0000) >> 16;
 		pld_buf[3] = (tick & 0xFF000000 )>> 24;
-		
-		// process_32bit_to_16bit(pld_buf, bytes_read, &bytes_read);
-		// dump the samples out to the serial channel.
-		int32_t * raw_samples = (int32_t*)(&pld_buf[NUM_BYTES_HEADER]);
-		for (int i = 0; i < bytes_read/4; i++)
+
 		{
-			Serial.printf("%ld\n", raw_samples[i]);
+			process_32bit_to_16bit(p_raw_sample_buf, bytes_read, &bytes_read);
+			// dump the samples out to the serial channel.
+			int16_t * raw_samples = (int16_t*)(&pld_buf[NUM_BYTES_HEADER]);
+			for (int i = 0; i < bytes_read/2; i++)
+			{
+				Serial.printf("%ld\n", raw_samples[i]);
+			}
 		}
 
 		udp.beginPacket(udp.remoteIP(),udp.remotePort()+gl_prefs.reply_offset);

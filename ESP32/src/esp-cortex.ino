@@ -29,7 +29,7 @@ IPAddress server_address; //note: may want to change to our local IP, to support
 
 // you shouldn't need to change these settings
 
-#define SAMPLE_RATE 16000
+#define SAMPLE_RATE 48000
 // most microphones will probably default to left channel but you may need to tie the L/R pin low
 #define I2S_MIC_CHANNEL I2S_CHANNEL_FMT_ONLY_LEFT
 // either wire your microphone to the same pins or change these to match your wiring
@@ -45,8 +45,8 @@ i2s_config_t i2s_config = {
     .channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT,
     .communication_format = I2S_COMM_FORMAT_STAND_I2S,
     .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 4,
-    .dma_buf_len = 1024,
+    .dma_buf_count = 2,
+    .dma_buf_len = 256,
     .use_apll = false,
     .tx_desc_auto_clear = false,
     .fixed_mclk = 0
@@ -128,7 +128,7 @@ uint8_t udp_pkt_buf[256] = {0};
 int ppp_stuffing_bidx = 0;
 
 #define NUM_BYTES_HEADER		6	//two bytes sequence, four bytes epoch
-#define NUM_BYTES_SAMPLE_BUFFER (512*sizeof(int32_t))
+#define NUM_BYTES_SAMPLE_BUFFER (128*sizeof(int32_t))
 unsigned char pld_buf[NUM_BYTES_HEADER + NUM_BYTES_SAMPLE_BUFFER] = {};
 unsigned char * p_raw_sample_buf = (unsigned char *)(&pld_buf[NUM_BYTES_HEADER]);
 

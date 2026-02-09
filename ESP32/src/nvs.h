@@ -17,7 +17,13 @@ typedef struct nvs_settings_t
   uint32_t remote_target_ip;
   uint32_t baudrate;
   uint8_t use_i2s;  //flag for whether or not the device has a mic
+
+  //ip address settings for static ip configuration only
   IPAddress static_ip;
+  IPAddress gateway;
+  IPAddress subnet;
+  IPAddress dns;
+
 }nvs_settings_t;
 
 extern Preferences preferences;

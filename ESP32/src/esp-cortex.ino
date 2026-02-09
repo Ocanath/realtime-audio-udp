@@ -60,7 +60,34 @@ i2s_pin_config_t i2s_mic_pins = {
     .data_in_num = I2S_MIC_SERIAL_DATA
 };
 
+void manage_static_ip(nvs_settings_t * p)
+{
+  if(p == NULL)
+  {
+    return;
+  }
+  if(p->subnet == IPAddress((uint32_t)0))
+  {
+    p->subnet.fromString("255.255.255.0"); //set default subnet mask
+  }
 
+  if(p->static_ip == IPAddress((uint32_t)IPV4_ADDR_ANY))
+  {
+    Serial.printf("No static IP requested. Allow DNS\r\n");
+  }
+  else
+  {
+    Serial.printf("Static IP configured as: %s\r\n", p->static_ip.toString().c_str());
+  }
+  if(WiFi.config(p->static_ip, p->gateway, p->subnet, p->dns))
+  {
+    Serial.printf("Static IP configuration successs\r\n");
+  }
+  else
+  {
+    Serial.printf("Static IP configuration failed\r\n");
+  }
+}
 
 void setup() {
   // put your setup code here, to run once:
@@ -74,6 +101,8 @@ void setup() {
   digitalWrite(BOOT_PIN, 0);
   init_prefs(&preferences, &gl_prefs);
 
+  manage_static_ip(&gl_prefs);
+
   Serial.begin(921600);  //this can stay 2mbps. WHICH IS CRAZY omg
 
   if(gl_prefs.baudrate == 0)
@@ -84,16 +113,7 @@ void setup() {
 
   int connected = 0;
   Serial.printf("\r\n\r\n Trying \'%s\' \'%s\'\r\n",gl_prefs.ssid, gl_prefs.password);
-  
-  if(gl_prefs.static_ip == IPAddress((uint32_t)IPV4_ADDR_ANY))
-  {
-    Serial.printf("No static IP requested. Allow DNS\r\n");
-  }
-  else
-  {
-    Serial.printf("Static IP configured as: %s\r\n", gl_prefs.static_ip.toString().c_str());
-  }
-  
+
 
   /*Begin wifi connection*/
   WiFi.mode(WIFI_STA);  
@@ -272,7 +292,7 @@ void loop()
       }
       /*Set the ssid*/
       // String addrstring;
-      gl_prefs.static_ip.fromString(ipstr);
+      gl_prefs.static_ip.fromString(String(ipstr));
       Serial.printf("Setting static ip to %s\r\n", gl_prefs.static_ip.toString());
       save = 1;
     }
@@ -300,8 +320,14 @@ void loop()
       }
       Serial.printf("UDP server on port: %d\r\n", gl_prefs.port);
       Serial.printf("Server Response Offset: %d\r\n", gl_prefs.reply_offset);
-      Serial.printf("IP address is: %s\r\n", WiFi.localIP().toString().c_str());
-  
+      Serial.printf("IP address: %s\r\n", WiFi.localIP().toString().c_str());
+      if(gl_prefs.static_ip != IPAddress((uint32_t)0))
+      {
+        Serial.printf("Requested Static IP: %s\r\n", gl_prefs.static_ip.toString());
+        Serial.printf("Subnet Mask: %s\r\n", gl_prefs.subnet.toString());
+        Serial.printf("Gateway: %s\r\n", gl_prefs.gateway.toString());
+        Serial.printf("DNS: %s\r\n", gl_prefs.dns.toString());
+      }
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////

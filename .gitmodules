@@ -1,3 +1,6 @@
 [submodule "Cpp/external/portaudio"]
 	path = Cpp/external/portaudio
 	url = https://github.com/PortAudio/portaudio.git
+[submodule "udp-uart-bridge-esp32"]
+	path = udp-uart-bridge-esp32
+	url = https://github.com/ocanath/udp-uart-bridge-esp32

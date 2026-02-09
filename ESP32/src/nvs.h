@@ -24,6 +24,8 @@ typedef struct nvs_settings_t
   IPAddress subnet;
   IPAddress dns;
 
+  uint8_t led_pin;
+
 }nvs_settings_t;
 
 extern Preferences preferences;

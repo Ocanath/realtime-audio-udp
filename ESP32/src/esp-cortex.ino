@@ -60,6 +60,21 @@ i2s_pin_config_t i2s_mic_pins = {
     .data_in_num = I2S_MIC_SERIAL_DATA
 };
 
+void ip_from_cmd_arg(const char * arg, IPAddress & addr)
+{
+  char ipstr[16] = {};
+  for(int i = 0; arg[i] != '\0'; i++)
+  {
+    if(arg[i] != '\r' && arg[i] != '\n')  //copy non carriage return characters
+    {
+      ipstr[i] = arg[i];
+    }
+  }
+  /*Set the ssid*/
+  // String addrstring;
+  addr.fromString(ipstr);
+}
+
 void manage_static_ip(nvs_settings_t * p)
 {
   if(p == NULL)
@@ -96,10 +111,20 @@ void setup() {
   digitalWrite(NRST_PIN, 1);
 
   pinMode(BOOT_PIN, OUTPUT); //input for HI-Z
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, 1);
   digitalWrite(BOOT_PIN, 0);
   init_prefs(&preferences, &gl_prefs);
+
+  if(gl_prefs.led_pin == 0)
+  {
+    gl_prefs.led_pin = LED_PIN;
+  }
+  if(gl_prefs.ssid[0] == 0)
+  {
+    snprintf(gl_prefs.ssid, sizeof(gl_prefs.ssid), "no ssid set!");
+  }
+
+  pinMode(gl_prefs.led_pin, OUTPUT);
+  digitalWrite(gl_prefs.led_pin, 1);
 
   manage_static_ip(&gl_prefs);
 
@@ -151,10 +176,22 @@ int cmd_match(const char * in, const char * cmd)
   return i;
 }
 
-#define UNSTUFFING_BUFFER_SIZE 256
-#define PAYLOAD_BUFFER_SIZE ((UNSTUFFING_BUFFER_SIZE - 2)/2)  //max cap based on unstuffing buffer size
-uint8_t gl_unstuffing_buffer[UNSTUFFING_BUFFER_SIZE] = {0};
+
+typedef struct buffer_t
+{
+  unsigned char * buf;
+  size_t size;
+  size_t len;
+}buffer_t;
+
+#define PAYLOAD_BUFFER_SIZE 64
 uint8_t gl_pld_buffer[PAYLOAD_BUFFER_SIZE] = {0};
+
+buffer_t gl_uart_buffer = {
+  .buf = gl_pld_buffer,
+  .size = sizeof(gl_pld_buffer),
+  .len = 0
+};
 
 
 // put your main code here, to run repeatedly:
@@ -163,7 +200,7 @@ uint8_t led_state = 1;
 uint8_t stm32_enabled = 0;
 uint32_t blink_per = PERIOD_DISCONNECTED;
 uint8_t udp_pkt_buf[256] = {0};
-int ppp_stuffing_bidx = 0;
+
 
 #define NUM_BYTES_HEADER		6	//two bytes sequence, four bytes epoch
 #define NUM_BYTES_SAMPLE_BUFFER (512*sizeof(int32_t))
@@ -243,30 +280,39 @@ void loop()
   }
 
   uint8_t serial_pkt_sent = 0;
-//   while(Serial2.available())
-//   {
-//       uint8_t new_byte = Serial2.read();
+  while(Serial2.available())
+  {
+      uint8_t new_byte = Serial2.read();
+      if(gl_uart_buffer.len >= gl_uart_buffer.size) //overrun guard
+      {
+        gl_uart_buffer.len = 0;
+      }
+      gl_pld_buffer[gl_uart_buffer.len++] = new_byte;  
+      
+      
+      if(new_byte == 0) //we forward cobs frames without parsing them - making this logic very simple and nice
+      {
+        gl_uart_buffer.len = 0; //start over from the beginning
+
+        if(gl_prefs.en_fixed_target == 0 && udp.remoteIP() != IPAddress(0,0,0,0))
+        {
+          udp.beginPacket(udp.remoteIP(), udp.remotePort()+gl_prefs.reply_offset);
+        }
+        else if (gl_prefs.en_fixed_target == 0 &&udp.remoteIP() == IPAddress(0,0,0,0))
+        {
+          udp.beginPacket(IPAddress(255,255,255,255), gl_prefs.port+gl_prefs.reply_offset);
+        }
+        else
+        {
+          IPAddress remote_ip(gl_prefs.remote_target_ip);
+          udp.beginPacket(remote_ip, gl_prefs.port+gl_prefs.reply_offset);
+        }
+        udp.write(gl_uart_buffer.buf, gl_uart_buffer.len);
+        udp.endPacket();      
+        serial_pkt_sent = 1;       
+      }
 //       int pld_len = parse_PPP_stream(new_byte, gl_pld_buffer, PAYLOAD_BUFFER_SIZE, gl_unstuffing_buffer, UNSTUFFING_BUFFER_SIZE, &ppp_stuffing_bidx);
-//       if(pld_len != 0)
-//       {
-//         if(gl_prefs.en_fixed_target == 0 && udp.remoteIP() != IPAddress(0,0,0,0))
-//         {
-//           udp.beginPacket(udp.remoteIP(), udp.remotePort()+gl_prefs.reply_offset);
-//         }
-//         else if (gl_prefs.en_fixed_target == 0 &&udp.remoteIP() == IPAddress(0,0,0,0))
-//         {
-//           udp.beginPacket(IPAddress(255,255,255,255), gl_prefs.port+gl_prefs.reply_offset);
-//         }
-//         else
-//         {
-//           IPAddress remote_ip(gl_prefs.remote_target_ip);
-//           udp.beginPacket(remote_ip, gl_prefs.port+gl_prefs.reply_offset);
-//         }
-//         udp.write((uint8_t*)gl_pld_buffer, pld_len);
-//         udp.endPacket();      
-//         serial_pkt_sent = 1;
-//       }
-//   }
+  }
 
   get_console_lines();
   if(gl_console_cmd.parsed == 0)
@@ -281,28 +327,55 @@ void loop()
     {
       match = 1;
       const char * arg = (const char *)(&gl_console_cmd.buf[cmp]);
-
-      char ipstr[16] = {};
-      for(int i = 0; arg[i] != '\0'; i++)
-      {
-        if(arg[i] != '\r' && arg[i] != '\n')  //copy non carriage return characters
-        {
-          ipstr[i] = arg[i];
-        }
-      }
       /*Set the ssid*/
-      // String addrstring;
-      gl_prefs.static_ip.fromString(String(ipstr));
+      ip_from_cmd_arg(arg, gl_prefs.static_ip);
       Serial.printf("Setting static ip to %s\r\n", gl_prefs.static_ip.toString());
+      save = 1;
+    }
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    cmp = cmd_match((const char *)gl_console_cmd.buf,"setsubnetmask ");
+    if(cmp > 0)
+    {
+      match = 1;
+      const char * arg = (const char *)(&gl_console_cmd.buf[cmp]);
+      /*Set the ssid*/
+      ip_from_cmd_arg(arg, gl_prefs.subnet);
+      Serial.printf("Setting subnet mask to %s\r\n", gl_prefs.subnet.toString());
       save = 1;
     }
     
     //////////////////////////////////////////////////////////////////////////////////////////////////////
-    cmp = cmd_match((const char *)gl_console_cmd.buf,"readstaticip");
+    cmp = cmd_match((const char *)gl_console_cmd.buf,"setgateway ");
     if(cmp > 0)
     {
       match = 1;
-      Serial.printf("Desired static ip is %s\r\n", gl_prefs.static_ip.toString());
+      const char * arg = (const char *)(&gl_console_cmd.buf[cmp]);
+      /*Set the ssid*/
+      ip_from_cmd_arg(arg, gl_prefs.gateway);
+      Serial.printf("Setting gateway to %s\r\n", gl_prefs.gateway.toString());
+      save = 1;
+    }
+        //////////////////////////////////////////////////////////////////////////////////////////////////////
+    cmp = cmd_match((const char *)gl_console_cmd.buf,"setdns ");
+    if(cmp > 0)
+    {
+      match = 1;
+      const char * arg = (const char *)(&gl_console_cmd.buf[cmp]);
+      /*Set the ssid*/
+      ip_from_cmd_arg(arg, gl_prefs.dns);
+      Serial.printf("Setting dns to %s\r\n", gl_prefs.dns.toString());
+      save = 1;
+    }
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    cmp = cmd_match((const char *)gl_console_cmd.buf,"readstaticipsettings");
+    if(cmp > 0)
+    {
+      match = 1;
+      Serial.printf("Desired static ip %s\r\n", gl_prefs.static_ip.toString());
+      Serial.printf("Subnet mask %s\r\n", gl_prefs.subnet.toString());
+      Serial.printf("Gateway is %s\r\n", gl_prefs.gateway.toString());
+      Serial.printf("DNS is %s\r\n", gl_prefs.dns.toString());
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -497,6 +570,29 @@ void loop()
       }
     }
 
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    cmp = cmd_match((const char *)gl_console_cmd.buf,"setledpin ");
+    if(cmp > 0)
+    {
+      match = 1;
+      const char * arg = (const char *)(&gl_console_cmd.buf[cmp]);
+      char * tmp;
+      uint8_t pin = (uint8_t)(strtol(arg, &tmp, 10));
+      Serial.printf("Changing led pin to: %d\r\n", pin);
+      /*Set the port*/
+      gl_prefs.led_pin = pin;
+      save = 1;
+    }
+
+    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    cmp = cmd_match((const char *)gl_console_cmd.buf,"readledpin");
+    if(cmp > 0)
+    {
+      match = 1;
+      Serial.printf("LED Pin is %d\r\n", gl_prefs.led_pin);
+    }
+
     //////////////////////////////////////////////////////////////////////////////////////////////////////
     cmp = cmd_match((const char *)gl_console_cmd.buf,"setbaudrate ");
     if(cmp > 0)
@@ -631,7 +727,7 @@ void loop()
   if(ts - led_ts > blink_per)
   {
     led_ts = ts;
-    digitalWrite(LED_PIN, led_state);
+    digitalWrite(gl_prefs.led_pin, led_state);
     led_state = ~led_state & 1;
     if(WiFi.status() != WL_CONNECTED)
     {
